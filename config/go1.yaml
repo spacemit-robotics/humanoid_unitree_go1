@@ -1,0 +1,115 @@
+# ============================================================
+# Unitree Go1 四足机器人配置
+# 按模块命名空间组织
+# ============================================================
+
+# ============================================================
+# 机器人基础信息
+# ============================================================
+robot_base:
+  name: "go1"
+  num_dof: 12       # 12 DOF：FR(3) + FL(3) + RR(3) + RL(3) 每腿 hip, thigh, calf
+  robot_dir: ".."
+  threads:
+    rl_infer:       # RL 推理线程
+      cpu_id: -1
+      sched: other
+      priority: 0
+    control_main:   # control_demo 主控制循环
+      cpu_id: -1
+      sched: other
+      priority: 0
+    driver_main:    # driver_demo / hardware 主线程
+      cpu_id: -1
+      sched: other
+      priority: 0
+
+# ============================================================
+# Simulation 模块参数
+# ============================================================
+simulation:
+  type: "mujoco"
+  
+  mujoco:
+    init_height: 0.35       # 四足站立高度（trunk 约 0.28m + 腿长）
+    assist_height: 0.30     # 悬挂保护目标高度
+    
+    sim_dt: 0.002               # 仿真步长
+    
+    controller:
+      # PD 增益（来自 go1 ONNX 训练 export 的 joint_stiffness/damping）
+      # 顺序：FR_hip, FR_thigh, FR_calf, FL_hip, FL_thigh, FL_calf, RR_hip, RR_thigh, RR_calf, RL_hip, RL_thigh, RL_calf
+      kp: [15.9, 15.9, 35.8, 15.9, 15.9, 35.8, 15.9, 15.9, 35.8, 15.9, 15.9, 35.8]
+      kd: [1.01, 1.01, 2.28, 1.01, 1.01, 2.28, 1.01, 1.01, 2.28, 1.01, 1.01, 2.28]
+      
+      # 默认关节角度（INIT_STATE 站立姿态，与 mjlab 训练一致）
+      default_joint_pos: [0.1, 0.9, -1.8,    # FR
+                         -0.1, 0.9, -1.8,   # FL
+                         0.1, 0.9, -1.8,    # RR
+                         -0.1, 0.9, -1.8]  # RL
+
+# ============================================================
+# Behavior Manager 模块参数
+# ============================================================
+behavior_manager:
+  kp: [15.9, 15.9, 35.8, 15.9, 15.9, 35.8, 15.9, 15.9, 35.8, 15.9, 15.9, 35.8]
+  kd: [1.01, 1.01, 2.28, 1.01, 1.01, 2.28, 1.01, 1.01, 2.28, 1.01, 1.01, 2.28]
+  damp_kd: [0.2, 0.2, 0.46, 0.2, 0.2, 0.46, 0.2, 0.2, 0.46, 0.2, 0.2, 0.46]
+
+  zero_pos: [0.1, 0.9, -1.8, -0.1, 0.9, -1.8, 0.1, 0.9, -1.8, -0.1, 0.9, -1.8]
+  
+  zero_duration: 2.0
+  control_dt: 0.002
+
+# ============================================================
+# RL Policy 模块参数
+# 观测：base_lin_vel(3) + ang_vel(3) + gravity(3) + command(3) + dof_pos(12) + dof_vel(12) + last_action(12) = 48
+# ============================================================
+rl_policy:
+  type: "onnx_infer"
+  rl_dt: 0.02
+  
+  onnx_infer:
+    policy_names: [velocity]  # 可用策略列表
+    default_policy: "velocity" # 默认策略
+
+    policies:
+      velocity:
+        model_path: "policy/velocity/velocity_flat.onnx"
+        action_joint_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        action_scale: [0.3728, 0.3728, 0.2485,
+                       0.3728, 0.3728, 0.2485,
+                       0.3728, 0.3728, 0.2485,
+                       0.3728, 0.3728, 0.2485]
+        action_blend_ratio: 0.8
+        infer_decimation: 1
+        rl_default_pos: [0.1, 0.9, -1.8, -0.1, 0.9, -1.8, 0.1, 0.9, -1.8, -0.1, 0.9, -1.8]
+        observation:
+          segment_0_terms: [base_lin_vel, ang_vel, gravity, command, dof_pos, dof_vel, last_action]
+          ang_vel_scale: 1.0
+          dof_pos_scale: 1.0
+          dof_vel_scale: 1.0
+          strict_dim_check: true
+        command:
+          scale: [1.0, 1.0, 1.0]
+          init: [0.5, 0.0, 0.0]
+        max_roll: 0.7
+        max_pitch: 0.7
+
+# ============================================================
+# Transport 模块参数
+# ============================================================
+transport:
+  type: "udp"   # 单机测试用 shm；多机用 udp 并配置 driver_ip/control_ip
+  
+  udp:
+    driver_ip: "10.0.90.6"
+    control_ip: "10.0.91.0"
+    state_port: 8800
+    control_port: 8801
+    hmi_port: 8802
+
+  shm:
+    prefix: "go1"
+    capacity: 4
+    slot_size: 4096
